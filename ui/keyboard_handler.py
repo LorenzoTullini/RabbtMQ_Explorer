@@ -5,13 +5,14 @@ Gestione degli input da tastiera
 """
 import time
 import keyboard
+import sys
 
 from rich.console import Console
 
-from config.connections import add_new_connection, get_connections_config
+from config.connections import add_new_connection, get_connections_config, get_connections_list
 from rabbitmq.connection import run_consumer_for_connection
 from ui.layouts import create_full_layout
-from utils.constants import set_selected_index, get_selected_index, get_connections_list
+from utils.constants import set_selected_index, get_selected_index
 from utils.constants import get_active_connection, clear_messages
 
 console = Console()
@@ -81,17 +82,17 @@ def handle_keyboard_events(live, connections, selected_index):
         if active_connection:
             clear_messages()
             live.update(create_full_layout(get_selected_index()))
-            console.print("\nMessaggi puliti.")
     
     def on_quit():
-        # Esci dall'applicazione
+        # Esci dall'applicazione in modo sicuro
         console.print("\nUscita dall'applicazione...")
-        raise KeyboardInterrupt
+        # Solleva l'eccezione per uscire dal loop principale
+        raise KeyboardInterrupt()
     
-    # Registra i callback per i tasti
-    keyboard.add_hotkey('up', on_key_up)
-    keyboard.add_hotkey('down', on_key_down)
-    keyboard.add_hotkey('enter', on_enter)
-    keyboard.add_hotkey('n', on_new)
-    keyboard.add_hotkey('c', on_clear)
-    keyboard.add_hotkey('q', on_quit)
+    # Registra i callback per i tasti con gestione più sicura
+    keyboard.add_hotkey('up', lambda: on_key_up())
+    keyboard.add_hotkey('down', lambda: on_key_down())
+    keyboard.add_hotkey('enter', lambda: on_enter())
+    keyboard.add_hotkey('n', lambda: on_new())
+    keyboard.add_hotkey('c', lambda: on_clear())
+    keyboard.add_hotkey('q', lambda: on_quit())

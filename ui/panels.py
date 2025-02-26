@@ -7,9 +7,9 @@ from rich.panel import Panel
 from rich.table import Table
 from rich import box
 
-from utils.constants import get_active_connection, get_connections_list, get_messages
+from config.connections import get_connections_list
 from rabbitmq.queue_manager import get_queues
-
+from utils.constants import get_active_connection, get_messages
 
 def make_sidebar(selected_index=None):
     """
@@ -140,6 +140,7 @@ def make_help_bar():
     help_text += "[yellow]↑/↓[/] Naviga connessioni "
     help_text += "[yellow]ENTER[/] Seleziona "
     help_text += "[yellow]N[/] Nuova connessione "
+    help_text += "[yellow]C[/] Pulisci messaggi "
     help_text += "[yellow]Q[/] Esci"
 
     return Panel(help_text, border_style="dim", padding=(0, 0))

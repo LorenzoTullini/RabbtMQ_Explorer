@@ -6,7 +6,6 @@ Application constants and global variables
 
 # Global variables initialized as None
 ACTIVE_CONNECTION = None
-CONNECTIONS_LIST = []
 CURRENT_MESSAGES = []
 MAX_MESSAGES = 100  # Maximum number of messages to keep in memory
 LIVE_INSTANCE = None  # Live instance for UI updates from callbacks
@@ -15,10 +14,10 @@ SELECTED_INDEX = 0  # Global selected index for UI updates
 
 def initialize_globals():
     """Initialize global variables with default values"""
-    global ACTIVE_CONNECTION, CONNECTIONS_LIST, CURRENT_MESSAGES
+    global ACTIVE_CONNECTION, CURRENT_MESSAGES
     ACTIVE_CONNECTION = None
-    CONNECTIONS_LIST = []
     CURRENT_MESSAGES = []
+    # Note: We don't reset CONNECTIONS_LIST here as it's managed in connections.py
 
 
 def set_live_instance(live):
@@ -54,16 +53,7 @@ def get_active_connection():
     return ACTIVE_CONNECTION
 
 
-def set_connections_list(connections):
-    """Set the global connections list"""
-    global CONNECTIONS_LIST
-    CONNECTIONS_LIST = connections
-
-
-def get_connections_list():
-    """Return the global connections list"""
-    return CONNECTIONS_LIST
-
+# Removed connection list functions since they're now in connections.py
 
 def add_message(message):
     """Add a message to the current messages list"""

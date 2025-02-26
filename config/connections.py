@@ -12,7 +12,21 @@ from datetime import datetime
 from rich.console import Console
 from rich.panel import Panel
 
-from utils.constants import set_connections_list, get_connections_list
+# Import from relative paths instead of absolute paths
+# Removed circular import: from config.connections import update_connection_last_used
+
+# Global variables for connection management
+CONNECTIONS_LIST = []
+
+def set_connections_list(connections):
+    """Set the global connections list"""
+    global CONNECTIONS_LIST
+    CONNECTIONS_LIST = connections
+
+
+def get_connections_list():
+    """Return the global connections list"""
+    return CONNECTIONS_LIST
 
 
 def get_connections_config():
