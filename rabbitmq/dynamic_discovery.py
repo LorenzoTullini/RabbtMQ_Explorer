@@ -30,51 +30,43 @@ class DynamicQueueDiscover:
     
     def connect(self, connection_config):
         """
-        Stabilisce una connessione a RabbitMQ con debugging avanzato
+        Establish connection to RabbitMQ with advanced debugging
         
         Args:
-            connection_config (dict): Configurazione della connessione
+            connection_config (dict): Connection configuration
             
         Returns:
-            bool: True se la connessione è stabilita, False altrimenti
+            bool: True if connection is established, False otherwise
         """
         try:
-            # Log di debug
+            # Debug log
             self._debug_log(f"Inizializzazione connessione a {connection_config['host']}/{connection_config['vhost']}", level=1)
             
-            # Chiudi eventuali connessioni precedenti
+            # Close any previous connections
             self.disconnect()
             
-            # Crea la connessione con parametri ottimizzati
+            # Create connection with optimized parameters
             credentials = pika.PlainCredentials(
                 connection_config['user'], 
                 connection_config['password']
             )
             
-            # Aggiungi parametri per lo stato della connessione
+            # Add parameters for connection status
             connection_params = pika.ConnectionParameters(
                 host=connection_config['host'],
                 virtual_host=connection_config['vhost'],
                 credentials=credentials,
-                heartbeat=5,  # 5 secondi di heartbeat per maggiore stabilità
+                heartbeat=5,
                 blocked_connection_timeout=30,
                 socket_timeout=5,
                 retry_delay=2,
                 stack_timeout=10,
-                connection_attempts=3  # Tenta 3 volte
+                connection_attempts=3
             )
             
             self._debug_log("Parametri di connessione configurati", level=2)
-            self._debug_log(f"Tentativo di connessione a {connection_config['host']}", level=1)
             
-            # Create a separate connection status message for monitoring
-            log_message({
-                'queue': 'system',
-                'body': f"Creazione connessione pika a {connection_config['host']}...",
-                'timestamp': datetime.now().isoformat()
-            })
-            
-            # Tentativo di connessione con più informazioni
+            # Connection attempt
             try:
                 self.connection = pika.BlockingConnection(connection_params)
                 self._debug_log("Connessione stabilita con successo", level=1)
@@ -83,74 +75,123 @@ class DynamicQueueDiscover:
                 self.connection_active = True
                 self.last_heartbeat_time = time.time()
                 
-                # Log dettagliato sulla connessione
                 log_message({
                     'queue': 'system',
                     'body': f"Connessione stabilita a {connection_config['host']}/{connection_config['vhost']}",
                     'timestamp': datetime.now().isoformat()
                 })
-            except pika.exceptions.AMQPConnectionError as conn_err:
-                log_error(f"Errore nella connessione AMQP: {conn_err}")
-                log_error(traceback.format_exc())
-                return False
             except Exception as e:
-                log_error(f"Errore generico nella connessione: {e}")
+                log_error(f"Errore nella connessione: {e}")
                 log_error(traceback.format_exc())
                 return False
             
-            # Crea una coda temporanea per intercettare i messaggi
-            self._debug_log("Creazione coda temporanea...", level=1)
-            result = self.channel.queue_declare(queue='', exclusive=True)
-            temp_queue_name = result.method.queue
-            self._debug_log(f"Coda temporanea creata: {temp_queue_name}", level=1)
-            
-            # Ottieni la configurazione di binding
-            exchanges = connection_config.get('exchanges', [''])
+            # Get configuration
+            exchanges = connection_config.get('exchanges', [])
             routing_patterns = connection_config.get('routing_patterns', ['#'])
             
-            # Binding basati sulla configurazione
-            bindings_count = 0
-            
-            for exchange in exchanges:
-                for pattern in routing_patterns:
+            # Handle discovery based on available exchanges
+            if not exchanges or (len(exchanges) == 1 and exchanges[0] == ''):
+                # If no specific exchanges are defined or only default exchange is specified,
+                # use a different strategy: create a temp queue without explicit bindings
+                self._debug_log("Nessun exchange specifico definito, utilizzo modalità di consumo diretto", level=1)
+                
+                # Create a temporary queue
+                result = self.channel.queue_declare(queue='', exclusive=True)
+                temp_queue_name = result.method.queue
+                self._debug_log(f"Coda temporanea creata: {temp_queue_name}", level=1)
+                
+                # Set up to consume directly without binding to default exchange
+                try:
+                    self._debug_log(f"Configurazione consumer diretto per coda {temp_queue_name}", level=1)
+                    self.channel.basic_consume(
+                        queue=temp_queue_name,
+                        on_message_callback=self._message_callback,
+                        auto_ack=True
+                    )
+                    self._debug_log("Consumer configurato con successo", level=1)
+                    
+                    log_message({
+                        'queue': 'system',
+                        'body': f"Ascolto messaggi diretti su coda temporanea {temp_queue_name}",
+                        'timestamp': datetime.now().isoformat()
+                    })
+                except Exception as consume_err:
+                    log_error(f"Errore nella configurazione del consumer: {consume_err}")
+                    log_error(traceback.format_exc())
+                    return False
+                    
+            else:
+                # If specific exchanges are defined, bind temporary queue to each exchange
+                self._debug_log(f"Utilizzo modalità binding a exchanges specifici: {exchanges}", level=1)
+                
+                # Create a temporary queue
+                result = self.channel.queue_declare(queue='', exclusive=True)
+                temp_queue_name = result.method.queue
+                self._debug_log(f"Coda temporanea creata: {temp_queue_name}", level=1)
+                
+                # Binding based on config (skip default exchange)
+                bindings_count = 0
+                
+                for exchange in exchanges:
+                    if exchange == '':
+                        self._debug_log(f"Saltato binding al default exchange (non consentito)", level=1)
+                        continue
+                        
+                    for pattern in routing_patterns:
+                        try:
+                            self._debug_log(f"Binding coda a exchange '{exchange}' con pattern '{pattern}'", level=1)
+                            self.channel.queue_bind(
+                                exchange=exchange,
+                                queue=temp_queue_name,
+                                routing_key=pattern
+                            )
+                            bindings_count += 1
+                            log_message({
+                                'queue': 'system',
+                                'body': f"Binding creato: exchange '{exchange}', routing key '{pattern}'",
+                                'timestamp': datetime.now().isoformat()
+                            })
+                        except Exception as bind_err:
+                            log_error(f"Errore nel binding: exchange={exchange}, pattern={pattern}, error={bind_err}")
+                            log_error(traceback.format_exc())
+                
+                # Check bindings
+                if bindings_count == 0:
+                    log_error("Nessun binding valido creato. Verifica le configurazioni di exchange.")
+                    
+                    # Fallback to direct consumption without binding
+                    self._debug_log("Fallback a modalità di consumo diretto", level=1)
                     try:
-                        self._debug_log(f"Binding coda a exchange '{exchange}' con pattern '{pattern}'", level=1)
-                        self.channel.queue_bind(
-                            exchange=exchange,
+                        self.channel.basic_consume(
                             queue=temp_queue_name,
-                            routing_key=pattern
+                            on_message_callback=self._message_callback,
+                            auto_ack=True
                         )
-                        bindings_count += 1
                         log_message({
                             'queue': 'system',
-                            'body': f"Binding creato: exchange '{exchange}', routing key '{pattern}'",
+                            'body': f"Ascolto messaggi diretti su coda temporanea {temp_queue_name} (fallback)",
                             'timestamp': datetime.now().isoformat()
                         })
-                    except Exception as bind_err:
-                        log_error(f"Errore nel binding: exchange={exchange}, pattern={pattern}, error={bind_err}")
+                    except Exception as fallback_err:
+                        log_error(f"Errore nella configurazione del consumer fallback: {fallback_err}")
                         log_error(traceback.format_exc())
+                        return False
+                else:
+                    # Set up consumer for the temporary queue
+                    try:
+                        self._debug_log(f"Configurazione consumer per coda {temp_queue_name}", level=1)
+                        self.channel.basic_consume(
+                            queue=temp_queue_name,
+                            on_message_callback=self._message_callback,
+                            auto_ack=True
+                        )
+                        self._debug_log("Consumer configurato con successo", level=1)
+                    except Exception as consume_err:
+                        log_error(f"Errore nella configurazione del consumer: {consume_err}")
+                        log_error(traceback.format_exc())
+                        return False
             
-            # Verifica dei binding
-            self._debug_log(f"Totale binding creati: {bindings_count}", level=1)
-            if bindings_count == 0:
-                log_error("Nessun binding creato. Verifica le configurazioni di exchange e routing pattern.")
-                return False
-                
-            # Configura il consumo della coda temporanea
-            try:
-                self._debug_log(f"Configurazione del consumer per la coda {temp_queue_name}", level=1)
-                self.channel.basic_consume(
-                    queue=temp_queue_name,
-                    on_message_callback=self._message_callback,
-                    auto_ack=True  # Auto acknowledgment
-                )
-                self._debug_log("Consumer configurato con successo", level=1)
-            except Exception as consume_err:
-                log_error(f"Errore nella configurazione del consumer: {consume_err}")
-                log_error(traceback.format_exc())
-                return False
-            
-            # Avvia il consumer thread
+            # Start consumer thread
             self._debug_log("Avvio thread consumer...", level=1)
             self.stop_event.clear()
             self._start_consumer_thread()
