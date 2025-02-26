@@ -22,7 +22,7 @@ from ui.animations import boot_animation
 from ui.layouts import create_full_layout
 from config.connections import get_connections_config, add_new_connection
 from rabbitmq.connection import run_consumer_for_connection
-from utils.constants import initialize_globals, get_active_connection, set_live_instance
+from utils.constants import initialize_globals, get_active_connection, set_live_instance, get_selected_index
 from utils.logger import log_message, log_error, ensure_log_directory
 
 from rich.live import Live
@@ -108,7 +108,6 @@ def main():
         
         # Inizializza variabili di controllo per l'interfaccia
         selected_index = 0
-        exit_app = False
         last_refresh_time = time.time()
         auto_refresh_interval = 1.0  # Aggiorna ogni secondo
         connection_status_check_interval = 5.0  # Controlla stato connessione ogni 5 secondi
@@ -123,18 +122,16 @@ def main():
             from ui.keyboard_handler import handle_keyboard_events
             
             # Registra il gestore degli eventi della tastiera
+            handle_keyboard_events(live, connections, selected_index)
+            
             try:
-                # handle_keyboard_events registra i callback per gli eventi tastiera
-                handle_keyboard_events(live, connections, selected_index)
-                
-                # Loop principale che mantiene l'applicazione in esecuzione
-                # Gli eventi della tastiera vengono gestiti dai callback registrati
+                # Loop principale dell'applicazione
                 while True:
                     current_time = time.time()
                     
                     # Aggiorna la schermata a intervalli regolari
                     if current_time - last_refresh_time >= auto_refresh_interval:
-                        live.update(create_full_layout(selected_index))
+                        live.update(create_full_layout(get_selected_index()))
                         last_refresh_time = current_time
                     
                     # Controlla lo stato della connessione a intervalli regolari
@@ -166,13 +163,18 @@ def main():
                                     set_active_connection(None)
                                     
                                     # Aggiorna l'interfaccia
-                                    live.update(create_full_layout(selected_index))
+                                    live.update(create_full_layout(get_selected_index()))
                         
                         last_connection_check_time = current_time
                     
-                    # Pausa per ridurre l'utilizzo della CPU
+                    # MODIFICA: Verifica direttamente i tasti premuti
+                    if keyboard.is_pressed('q'):
+                        print("\nUscita dall'applicazione...")
+                        break
+                    
+                    # Evita utilizzo elevato della CPU
                     time.sleep(0.1)
-                
+                    
             except KeyboardInterrupt:
                 # Gestisci uscita con Ctrl+C
                 console.print("\nUscita dall'applicazione...")
