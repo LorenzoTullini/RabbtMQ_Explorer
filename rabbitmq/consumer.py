@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 """
-Funzionalità consumer per RabbitMQ
+Funzionalità consumer per RabbitMQ con API Management
 """
 import threading
 from datetime import datetime
@@ -13,7 +13,7 @@ from utils.logger import log_message, log_error
 from ui.layouts import create_full_layout
 
 
-def message_callback(ch, method, properties, body):
+def message_callback(ch, method, properties, body, queue_name):
     """
     Callback per la gestione dei messaggi ricevuti.
     
@@ -22,14 +22,9 @@ def message_callback(ch, method, properties, body):
         method: Metodo di consegna
         properties: Proprietà del messaggio
         body: Corpo del messaggio
+        queue_name: Nome della coda
     """
     try:
-        # Ottieni informazioni sulla coda dal consumer tag
-        try:
-            queue_name = method.consumer_tag.split("_")[-1]
-        except Exception:
-            queue_name = "Sconosciuta"
-
         # Ottieni exchange e routing key
         exchange = method.exchange or "default"
         routing_key = method.routing_key
@@ -78,8 +73,81 @@ def setup_consumer(rmq_connection, channel, consumable_queues, connection_config
     Returns:
         bool: True se la configurazione è stata completata con successo, False altrimenti
     """
-    # Questo metodo è mantenuto per retrocompatibilità, ma non viene utilizzato
-    # nel nuovo approccio con scoperta dinamica
-    
-    log_error("Il metodo setup_consumer è deprecato. Utilizzare dynamic_discovery.setup_dynamic_consumer.")
-    return False
+    try:
+        # Se non ci sono code consumabili, crea una coda temporanea
+        if not consumable_queues:
+            log_message({
+                'queue': 'system',
+                'body': "Nessuna coda consumabile trovata. Creazione coda temporanea...",
+                'timestamp': datetime.now().isoformat()
+            })
+            
+            # Crea una coda temporanea per l'ascolto di tutto il traffico
+            result = channel.queue_declare(queue='', exclusive=True)
+            temp_queue = result.method.queue
+            
+            # Binding al default exchange
+            channel.queue_bind(exchange='amq.topic', queue=temp_queue, routing_key='#')
+            
+            # Configura il consumer per la coda temporanea
+            channel.basic_consume(
+                queue=temp_queue,
+                on_message_callback=lambda ch, method, props, body: message_callback(
+                    ch, method, props, body, f"temp:{temp_queue}"
+                ),
+                auto_ack=True
+            )
+            
+            log_message({
+                'queue': 'system',
+                'body': f"Consumer configurato per coda temporanea: {temp_queue}",
+                'timestamp': datetime.now().isoformat()
+            })
+        else:
+            # Configura consumer per ogni coda consumabile
+            for queue_name in consumable_queues:
+                try:
+                    # Binding della callback con il nome della coda
+                    callback = lambda ch, method, props, body, q=queue_name: message_callback(
+                        ch, method, props, body, q
+                    )
+                    
+                    # Configura il consumer
+                    channel.basic_consume(
+                        queue=queue_name,
+                        on_message_callback=callback,
+                        auto_ack=True
+                    )
+                    
+                    log_message({
+                        'queue': 'system',
+                        'body': f"Consumer configurato per coda: {queue_name}",
+                        'timestamp': datetime.now().isoformat()
+                    })
+                except Exception as queue_err:
+                    log_error(f"Errore nella configurazione del consumer per {queue_name}: {queue_err}")
+        
+        # Avvia un thread per processare i messaggi in background
+        def consume_loop():
+            try:
+                log_message({
+                    'queue': 'system',
+                    'body': "Thread consumer avviato",
+                    'timestamp': datetime.now().isoformat()
+                })
+                
+                # Start consuming (this will block the thread)
+                channel.start_consuming()
+            except Exception as e:
+                log_error(f"Errore nel thread consumer: {e}")
+        
+        consumer_thread = threading.Thread(target=consume_loop, daemon=True)
+        consumer_thread.start()
+        
+        # Store thread reference in the config
+        connection_config['consumer_thread'] = consumer_thread
+        
+        return True
+    except Exception as e:
+        log_error(f"Errore nella configurazione dei consumer: {e}")
+        return False
